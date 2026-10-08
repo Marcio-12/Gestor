@@ -247,7 +247,7 @@ def gerar_cobrancas(conexao):
 
 		ultimo_envio = cliente["ultimo_envio_cobranca"]
 		deve_enviar = (
-			(ultimo_envio is None and dias_atraso == 3)
+			(ultimo_envio is None and dias_atraso >= 3)
 			or (
 				ultimo_envio is not None
 				and (hoje - ultimo_envio).days >= 2
