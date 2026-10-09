@@ -1,4 +1,6 @@
 .env
+.venv/
+clientes.db
 __pycache__/
 *.pyc
 dist/
