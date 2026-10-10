@@ -7,6 +7,7 @@ import sqlite3
 from datetime import datetime
 import gestor
 
+# Copyright (c) 2026 Marcio Ramos. Todos os direitos reservados.
 # Configuração do tema do CustomTkinter
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
@@ -43,6 +44,7 @@ class AppGestor(ctk.CTk):
     # Layout Principal (Grid 2 Colunas)
     self.grid_columnconfigure(1, weight=1)
     self.grid_rowconfigure(0, weight=1)
+    self.grid_rowconfigure(1, weight=0)
 
     # ================= PAINEL ESQUERDO =================
     self.frame_form = ctk.CTkTabview(self, width=290)
@@ -115,28 +117,11 @@ class AppGestor(ctk.CTk):
         height=30,
     )
     self.ent_vencimento.pack(fill="x", padx=15, pady=(2, 6))
-    self.lbl_datas_atrasadas = ctk.CTkLabel(
-        self.aba_cliente,
-        text="Datas/Vencimentos Atrasados (opcional):",
-        anchor="w",
-        font=ctk.CTkFont(size=12, weight="bold"),
-    )
-    self.lbl_datas_atrasadas.pack(fill="x", padx=15, pady=(4, 0))
-    self.ent_datas_atrasadas = ctk.CTkEntry(
-        self.aba_cliente,
-        placeholder_text="Ex: 10/07/2026, 10/08/2026",
-        height=30,
-    )
-    self.ent_datas_atrasadas.pack(fill="x", padx=15, pady=(2, 6))
-    self.ent_datas_atrasadas.bind(
-        "<KeyRelease>", self.formatar_datas_digitadas
-    )
     for entrada in (
         self.ent_nome,
         self.ent_telefone,
         self.ent_valor,
         self.ent_vencimento,
-        self.ent_datas_atrasadas,
     ):
       entrada.bind(
           "<KeyRelease>", self.verificar_formulario_limpo, add="+"
@@ -207,6 +192,28 @@ class AppGestor(ctk.CTk):
     )
     self.ent_nome_banco.pack(fill="x", padx=15, pady=(2, 4))
 
+    self.lbl_dias_pre = ctk.CTkLabel(
+        self.aba_configuracoes,
+        text="Dias para cobrança pré-vencimento:",
+        font=ctk.CTkFont(size=11, weight="bold"),
+    )
+    self.lbl_dias_pre.pack(anchor="w", padx=15, pady=(2, 0))
+    self.ent_dias_pre = ctk.CTkEntry(
+        self.aba_configuracoes, placeholder_text="Ex: 2", height=30
+    )
+    self.ent_dias_pre.pack(fill="x", padx=15, pady=(2, 4))
+
+    self.lbl_intervalo_pos = ctk.CTkLabel(
+        self.aba_configuracoes,
+        text="Intervalo pós-vencimento (dias):",
+        font=ctk.CTkFont(size=11, weight="bold"),
+    )
+    self.lbl_intervalo_pos.pack(anchor="w", padx=15, pady=(2, 0))
+    self.ent_intervalo_pos = ctk.CTkEntry(
+        self.aba_configuracoes, placeholder_text="Ex: 3", height=30
+    )
+    self.ent_intervalo_pos.pack(fill="x", padx=15, pady=(2, 4))
+
     self.btn_salvar_configuracoes = ctk.CTkButton(
         self.aba_configuracoes,
         text="💾 Salvar Configurações",
@@ -226,11 +233,21 @@ class AppGestor(ctk.CTk):
     # ================= PAINEL DIREITO (TABELA E AÇÕES) =================
     self.frame_tabela = ctk.CTkFrame(self, corner_radius=10)
     self.frame_tabela.grid(row=0, column=1, padx=(0, 15), pady=15, sticky="nsew")
-    self.frame_tabela.grid_rowconfigure(1, weight=1)
+    self.frame_tabela.grid_rowconfigure(0, weight=1)
     self.frame_tabela.grid_columnconfigure(0, weight=1)
+    self.abas_financeiras = ctk.CTkTabview(self.frame_tabela)
+    self.abas_financeiras.grid(row=0, column=0, sticky="nsew")
+    self.abas_financeiras.add("Clientes")
+    self.abas_financeiras.add("Parcelas")
+    self.aba_clientes = self.abas_financeiras.tab("Clientes")
+    self.aba_parcelas = self.abas_financeiras.tab("Parcelas")
+    self.aba_clientes.grid_rowconfigure(1, weight=1)
+    self.aba_clientes.grid_columnconfigure(0, weight=1)
+    self.aba_parcelas.grid_rowconfigure(4, weight=1)
+    self.aba_parcelas.grid_columnconfigure(0, weight=1)
 
     # Botões Superiores
-    self.frame_acoes = ctk.CTkFrame(self.frame_tabela, fg_color="transparent")
+    self.frame_acoes = ctk.CTkFrame(self.aba_clientes, fg_color="transparent")
     self.frame_acoes.grid(row=0, column=0, padx=10, pady=10, sticky="ew")
 
     self.btn_cobrancas = ctk.CTkButton(
@@ -243,15 +260,6 @@ class AppGestor(ctk.CTk):
         command=self.disparar_cobrancas,
     )
     self.btn_cobrancas.pack(side="left", padx=5)
-
-    self.btn_pago = ctk.CTkButton(
-        self.frame_acoes,
-        text="✅ Marcar Pago",
-        fg_color="#1f6aa5",
-        width=130,
-        command=self.marcar_como_pago,
-    )
-    self.btn_pago.pack(side="left", padx=5)
 
     self.btn_editar = ctk.CTkButton(
         self.frame_acoes,
@@ -288,7 +296,7 @@ class AppGestor(ctk.CTk):
     # Tabela
     colunas = ("id", "nome", "telefone", "valor", "vencimento", "status")
     self.tree = ttk.Treeview(
-        self.frame_tabela, columns=colunas, show="headings"
+        self.aba_clientes, columns=colunas, show="headings"
     )
 
     self.tree.heading("id", text="ID")
@@ -307,11 +315,124 @@ class AppGestor(ctk.CTk):
 
     self.tree.grid(row=1, column=0, padx=10, pady=(0, 10), sticky="nsew")
     self.tree.tag_configure("Pago", foreground="#55d66b")
-    self.tree.tag_configure("Atrasado", foreground="#ff5c5c")
+    self.tree.tag_configure("Atrasada", foreground="#ff5c5c")
+    self.tree.tag_configure("Em Acordo", foreground="#c58cff")
+    self.tree.tag_configure("Adiantada", foreground="#62d9d9")
     self.tree.tag_configure("Pendente", foreground="#f5d76e")
+
+    self.lbl_parcelas = ctk.CTkLabel(
+        self.aba_parcelas,
+        text="Gestão de Parcelas e Status",
+        font=ctk.CTkFont(size=17, weight="bold"),
+    )
+    self.lbl_parcelas.grid(row=0, column=0, padx=12, pady=(10, 4), sticky="w")
+    self.clientes_parcelas = {}
+    self.filtro_cliente_parcelas = tk.StringVar(
+        value="Todos os Clientes"
+    )
+    self.menu_cliente_parcelas = ctk.CTkOptionMenu(
+        self.aba_parcelas,
+        variable=self.filtro_cliente_parcelas,
+        values=["Todos os Clientes"],
+        command=self.filtrar_parcelas_por_cliente,
+    )
+    self.menu_cliente_parcelas.grid(
+        row=1, column=0, padx=12, pady=(0, 8), sticky="w"
+    )
+    self.frame_inserir_parcela = ctk.CTkFrame(
+        self.aba_parcelas, fg_color="transparent"
+    )
+    self.frame_inserir_parcela.grid(
+        row=2, column=0, padx=10, pady=(0, 8), sticky="ew"
+    )
+    self.ent_data_parcela = ctk.CTkEntry(
+        self.frame_inserir_parcela,
+        placeholder_text="Data (DD/MM/AAAA)",
+        width=170,
+    )
+    self.ent_data_parcela.pack(side="left", padx=4)
+    self.ent_data_parcela.bind(
+        "<KeyRelease>", self.formatar_data_parcela
+    )
+    self.ent_valor_parcela = ctk.CTkEntry(
+        self.frame_inserir_parcela,
+        placeholder_text="Valor (R$)",
+        width=120,
+    )
+    self.ent_valor_parcela.pack(side="left", padx=4)
+    self.ent_valor_parcela.bind(
+        "<KeyRelease>", self.formatar_valor_parcela
+    )
+    self.btn_inserir_parcela = ctk.CTkButton(
+        self.frame_inserir_parcela,
+        text="+ Inserir parcela",
+        fg_color="#1f6aa5",
+        hover_color="#144870",
+        width=140,
+        command=self.inserir_parcela,
+        state="disabled",
+    )
+    self.btn_inserir_parcela.pack(side="left", padx=4)
+    self.filtro_parcelas = tk.StringVar(value="Pendente")
+    self.frame_filtros_parcelas = ctk.CTkFrame(
+        self.aba_parcelas, fg_color="transparent"
+    )
+    self.frame_filtros_parcelas.grid(
+        row=3, column=0, padx=10, pady=(0, 8), sticky="ew"
+    )
+    for texto in ("Todas", "Pendente", "Atrasada", "Paga", "Em Acordo"):
+      ctk.CTkRadioButton(
+          self.frame_filtros_parcelas,
+          text=texto,
+          variable=self.filtro_parcelas,
+          value=texto,
+          command=self.atualizar_tabela_parcelas,
+      ).pack(side="left", padx=8)
+    colunas_parcelas = (
+        "id", "cliente", "referencia", "vencimento", "valor", "status"
+    )
+    self.tree_parcelas = ttk.Treeview(
+        self.aba_parcelas, columns=colunas_parcelas, show="headings"
+    )
+    for coluna, titulo, largura in (
+        ("id", "ID", 55),
+        ("cliente", "Cliente", 220),
+        ("referencia", "Referência", 110),
+        ("vencimento", "Vencimento", 110),
+        ("valor", "Valor (R$)", 110),
+        ("status", "Status", 120),
+    ):
+      self.tree_parcelas.heading(coluna, text=titulo)
+      self.tree_parcelas.column(
+          coluna, width=largura,
+          anchor="e" if coluna == "valor" else "center"
+      )
+    self.tree_parcelas.grid(
+        row=4, column=0, padx=10, pady=(0, 10), sticky="nsew"
+    )
+    self.tree_parcelas.tag_configure("Atrasada", foreground="#ff5c5c")
+    self.tree_parcelas.tag_configure("Pendente", foreground="#f5d76e")
+    self.tree_parcelas.tag_configure("Pago", foreground="#55d66b")
+    self.tree_parcelas.tag_configure("Adiantada", foreground="#62d9d9")
+    self.tree_parcelas.tag_configure("Em Acordo", foreground="#c58cff")
+    self.tree_parcelas.bind("<Double-1>", self.alterar_status_parcela)
+
+    self.frame_rodape = ctk.CTkFrame(self, fg_color="transparent", height=24)
+    self.frame_rodape.grid(
+        row=1, column=0, columnspan=2, padx=15, pady=(0, 5), sticky="ew"
+    )
+    self.lbl_assinatura = ctk.CTkLabel(
+        self.frame_rodape,
+        text="v1.0.0 | Dev: Marcio Ramos",
+        font=ctk.CTkFont(size=9),
+        text_color="#505050",
+    )
+    self.lbl_assinatura.pack(side="right", padx=4)
 
     # Carregar Clientes na Tabela
     self.atualizar_tabela()
+    self.carregar_clientes_parcelas()
+    self.atualizar_tabela_parcelas()
     self.update()
     self.after(100, self.carregar_configuracoes)
 
@@ -338,12 +459,197 @@ class AppGestor(ctk.CTk):
           tags=(c["status_pagamento"],),
       )
 
+  def atualizar_tabela_parcelas(self):
+    """Atualiza a lista financeira conforme o chip de status selecionado."""
+    for item in self.tree_parcelas.get_children():
+      self.tree_parcelas.delete(item)
+    try:
+      parcelas = gestor.listar_parcelas(
+          self.conexao,
+          self.filtro_parcelas.get(),
+          self.clientes_parcelas.get(
+              self.filtro_cliente_parcelas.get()
+          ),
+      )
+    except (sqlite3.Error, ValueError) as erro:
+      messagebox.showerror("Erro ao carregar parcelas", str(erro))
+      return
+    for parcela in parcelas:
+      vencimento = datetime.strptime(
+          parcela["data_vencimento"], "%Y-%m-%d"
+      ).strftime("%d/%m/%Y")
+      valor = f"R$ {parcela['valor']:.2f}".replace(".", ",")
+      self.tree_parcelas.insert(
+          "",
+          "end",
+          values=(
+              parcela["id"],
+              parcela["cliente_nome"],
+              parcela["mes_referencia"],
+              vencimento,
+              valor,
+              parcela["status"],
+          ),
+          tags=(parcela["status"],),
+      )
+
+  def carregar_clientes_parcelas(self):
+    """Carrega o menu com todos os clientes e preserva a seleção atual."""
+    try:
+      clientes = gestor.listar_clientes_filtro(self.conexao)
+    except sqlite3.Error as erro:
+      messagebox.showerror("Erro ao carregar clientes", str(erro))
+      return
+    self.clientes_parcelas = {"Todos os Clientes": None}
+    for cliente in clientes:
+      exibicao = f"{cliente['nome']} (ID {cliente['id']})"
+      self.clientes_parcelas[exibicao] = cliente["id"]
+    valores = list(self.clientes_parcelas)
+    selecao_atual = self.filtro_cliente_parcelas.get()
+    if selecao_atual not in self.clientes_parcelas:
+      selecao_atual = "Todos os Clientes"
+      self.filtro_cliente_parcelas.set(selecao_atual)
+    self.menu_cliente_parcelas.configure(
+        values=valores,
+        variable=self.filtro_cliente_parcelas,
+    )
+    self.filtrar_parcelas_por_cliente()
+
+  def filtrar_parcelas_por_cliente(self, _cliente_selecionado=None):
+    """Filtra a tabela pela combinação de cliente e status selecionados."""
+    cliente_id = self.clientes_parcelas.get(
+        self.filtro_cliente_parcelas.get()
+    )
+    self.btn_inserir_parcela.configure(
+        state="normal" if cliente_id is not None else "disabled"
+    )
+    self.atualizar_tabela_parcelas()
+
+  def inserir_parcela(self):
+    """Insere uma parcela apenas para o cliente escolhido."""
+    cliente_id = self.clientes_parcelas.get(
+        self.filtro_cliente_parcelas.get()
+    )
+    if cliente_id is None:
+      messagebox.showwarning(
+          "Cliente obrigatorio",
+          "Selecione um cliente antes de inserir uma parcela.",
+      )
+      return
+    data_vencimento = self.ent_data_parcela.get().strip()
+    campos = (data_vencimento, self.ent_valor_parcela.get().strip())
+    if not all(campos):
+      messagebox.showwarning(
+          "Campos obrigatorios",
+          "Preencha data e valor da parcela.",
+      )
+      return
+    try:
+      mes_referencia = datetime.strptime(
+          data_vencimento, "%d/%m/%Y"
+      ).strftime("%m/%Y")
+      gestor.inserir_parcela(
+          self.conexao,
+          cliente_id,
+          mes_referencia,
+          self.ent_valor_parcela.get(),
+          data_vencimento,
+      )
+    except (sqlite3.Error, ValueError) as erro:
+      messagebox.showerror("Erro ao inserir parcela", str(erro))
+      return
+    self.ent_valor_parcela.delete(0, "end")
+    self.ent_data_parcela.delete(0, "end")
+    self.atualizar_tabela_parcelas()
+    self.atualizar_tabela()
+    messagebox.showinfo("Sucesso", "Parcela inserida sem alterar o historico.")
+
+  def _substituir_texto_mascarado(self, entrada, texto):
+    """Atualiza uma entrada mascarada sem reprocessar o proprio evento."""
+    if getattr(self, "_formatando_parcela", False):
+      return
+    if entrada.get() == texto:
+      return
+    self._formatando_parcela = True
+    try:
+      entrada.delete(0, "end")
+      entrada.insert(0, texto)
+      entrada.icursor("end")
+    finally:
+      self._formatando_parcela = False
+
+  def formatar_data_parcela(self, _evento=None):
+    """Mascara a data da parcela no formato DD/MM/AAAA."""
+    digitos = re.sub(r"\D", "", self.ent_data_parcela.get())[:8]
+    texto = digitos
+    if len(digitos) > 4:
+      texto = f"{digitos[:2]}/{digitos[2:4]}/{digitos[4:]}"
+    elif len(digitos) > 2:
+      texto = f"{digitos[:2]}/{digitos[2:]}"
+    self._substituir_texto_mascarado(self.ent_data_parcela, texto)
+
+  def formatar_valor_parcela(self, _evento=None):
+    """Mascara o valor da parcela como reais com duas casas decimais."""
+    texto = formatar_valor_moeda(self.ent_valor_parcela.get())
+    self._substituir_texto_mascarado(self.ent_valor_parcela, texto)
+
+  def alterar_status_parcela(self, _evento=None):
+    """Altera o status da parcela selecionada e persiste imediatamente."""
+    selecionado = self.tree_parcelas.selection()
+    if not selecionado:
+      return
+    item = self.tree_parcelas.item(selecionado[0])
+    status_atual = str(item["values"][5])
+    if status_atual in ("Pago", "Adiantada"):
+      status_atual = "Paga"
+    janela = ctk.CTkToplevel(self)
+    janela.title("Alterar status da parcela")
+    janela.geometry("320x190")
+    janela.transient(self)
+    janela.grab_set()
+    ctk.CTkLabel(
+        janela, text="Novo status:", font=ctk.CTkFont(size=14, weight="bold")
+    ).pack(pady=(20, 8))
+    status = tk.StringVar(value=status_atual)
+    ctk.CTkOptionMenu(
+        janela,
+        variable=status,
+        values=["Pendente", "Atrasada", "Paga", "Em Acordo"],
+    ).pack(fill="x", padx=30, pady=4)
+
+    def salvar_status():
+      try:
+        gestor.atualizar_status_mensalidade(
+            self.conexao, int(item["values"][0]), status.get()
+        )
+      except (sqlite3.Error, ValueError) as erro:
+        messagebox.showerror(
+            "Erro ao atualizar status", str(erro), parent=janela
+        )
+        return
+      janela.grab_release()
+      janela.destroy()
+      self.atualizar_tabela_parcelas()
+      self.atualizar_tabela()
+
+    ctk.CTkButton(
+        janela, text="Salvar status", command=salvar_status
+    ).pack(fill="x", padx=30, pady=(10, 15))
+
   def carregar_configuracoes(self):
     configuracoes = gestor.obter_configuracoes(self.conexao)
     campos = (
         (self.ent_nome_empresa, configuracoes["nome_empresa"]),
         (self.ent_chave_pix, configuracoes["chave_pix"]),
         (self.ent_nome_banco, configuracoes["nome_banco"]),
+        (
+            self.ent_dias_pre,
+            configuracoes["dias_cobranca_pre_vencimento"],
+        ),
+        (
+            self.ent_intervalo_pos,
+            configuracoes["intervalo_cobranca_pos_vencimento"],
+        ),
     )
     for entrada, valor in campos:
       entrada.delete(0, "end")
@@ -358,6 +664,8 @@ class AppGestor(ctk.CTk):
           self.ent_nome_empresa.get(),
           self.ent_chave_pix.get(),
           self.ent_nome_banco.get(),
+          self.ent_dias_pre.get(),
+          self.ent_intervalo_pos.get(),
       )
       messagebox.showinfo(
           "Sucesso", "Configurações salvas com sucesso!"
@@ -379,6 +687,8 @@ class AppGestor(ctk.CTk):
           self.ent_nome_empresa,
           self.ent_chave_pix,
           self.ent_nome_banco,
+          self.ent_dias_pre,
+          self.ent_intervalo_pos,
       ):
         entrada.delete(0, "end")
       messagebox.showinfo(
@@ -449,8 +759,6 @@ class AppGestor(ctk.CTk):
     telefone = self.ent_telefone.get().strip()
     valor = self.ent_valor.get().strip()
     venc_str = self.ent_vencimento.get().strip()
-    datas_atrasadas = self.ent_datas_atrasadas.get().strip(", ")
-
     if not (nome and telefone and valor and venc_str):
       messagebox.showwarning("Aviso", "Preencha todos os campos!")
       return
@@ -463,7 +771,6 @@ class AppGestor(ctk.CTk):
             telefone,
             valor,
             venc_str,
-            datas_atrasadas,
         )
         mensagem = f"Cliente {nome} cadastrado com sucesso!"
       else:
@@ -474,12 +781,13 @@ class AppGestor(ctk.CTk):
             telefone,
             valor,
             venc_str,
-            datas_atrasadas,
         )
         mensagem = f"Cliente {nome} atualizado com sucesso!"
       messagebox.showinfo("Sucesso", mensagem)
       self.cancelar_edicao()
       self.atualizar_tabela()
+      self.carregar_clientes_parcelas()
+      self.atualizar_tabela_parcelas()
     except ValueError as erro:
       messagebox.showerror("Dados invalidos", str(erro))
     except sqlite3.Error as erro:
@@ -504,21 +812,6 @@ class AppGestor(ctk.CTk):
     self.ent_valor.insert(0, formatar_valor_moeda(str(valores[3])))
     self.ent_vencimento.delete(0, "end")
     self.ent_vencimento.insert(0, str(self._dia_do_valor(valores[4])))
-    try:
-      mensalidades = gestor.listar_mensalidades_abertas(
-          self.conexao, self.cliente_em_edicao
-      )
-      datas = [
-          datetime.strptime(
-              mensalidade["data_vencimento"], "%Y-%m-%d"
-          ).strftime("%d/%m/%Y")
-          for mensalidade in mensalidades
-      ]
-      self.ent_datas_atrasadas.delete(0, "end")
-      self.ent_datas_atrasadas.insert(0, ", ".join(datas))
-    except sqlite3.Error as erro:
-      messagebox.showerror("Erro no banco de dados", str(erro))
-      return
     self.btn_cadastrar.configure(text="💾 Salvar Alterações")
     self.btn_cancelar.configure(state="normal")
 
@@ -536,7 +829,6 @@ class AppGestor(ctk.CTk):
         self.ent_telefone,
         self.ent_valor,
         self.ent_vencimento,
-        self.ent_datas_atrasadas,
     ):
       entrada.delete(0, "end")
     self.btn_cadastrar.configure(text="➕ Cadastrar")
@@ -567,7 +859,7 @@ class AppGestor(ctk.CTk):
 
     janela = ctk.CTkToplevel(self)
     janela.title("Baixa de mensalidades")
-    janela.geometry("420x420")
+    janela.geometry("420x480")
     janela.transient(self)
     janela.grab_set()
     self.janela_baixa = janela
@@ -595,6 +887,14 @@ class AppGestor(ctk.CTk):
       checkbox.pack(anchor="w", padx=10, pady=6)
       selecoes.append((mensalidade["id"], variavel))
 
+    ctk.CTkLabel(
+        janela, text="Desconto para pagamento adiantado (R$), opcional:"
+    ).pack(anchor="w", padx=20)
+    ent_desconto = ctk.CTkEntry(
+        janela, placeholder_text="Ex: 10,00", height=30
+    )
+    ent_desconto.pack(fill="x", padx=20, pady=(2, 10))
+
     def confirmar_baixa():
       ids = [identificador for identificador, variavel in selecoes
              if variavel.get()]
@@ -606,7 +906,9 @@ class AppGestor(ctk.CTk):
         )
         return
       try:
-        gestor.dar_baixa_mensalidades(self.conexao, ids)
+        gestor.dar_baixa_mensalidades(
+            self.conexao, ids, ent_desconto.get() or 0
+        )
       except (sqlite3.Error, ValueError) as erro:
         messagebox.showerror(
             "Erro ao registrar pagamento", str(erro), parent=janela
@@ -627,6 +929,40 @@ class AppGestor(ctk.CTk):
         command=confirmar_baixa,
     ).pack(fill="x", padx=20, pady=(0, 20))
 
+  def registrar_acordo(self):
+    """Abre um acordo para a primeira parcela aberta do cliente selecionado."""
+    selecionado = self.tree.selection()
+    if not selecionado:
+      messagebox.showwarning("Aviso", "Selecione um cliente na tabela!")
+      return
+    cliente_id = self.tree.item(selecionado[0])["values"][0]
+    mensalidades = gestor.listar_mensalidades_abertas(
+        self.conexao, cliente_id
+    )
+    if not mensalidades:
+      messagebox.showinfo("Mensalidades", "Não há parcelas abertas.")
+      return
+    parcela = mensalidades[0]
+    nova_data = ctk.CTkInputDialog(
+        text="Nova data (DD/MM/AAAA):", title="Renegociar parcela"
+    ).get_input()
+    novo_valor = ctk.CTkInputDialog(
+        text="Novo valor (R$):", title="Renegociar parcela"
+    ).get_input()
+    if not nova_data or not novo_valor:
+      return
+    try:
+      gestor.registrar_acordo(
+          self.conexao, parcela["id"], nova_data, novo_valor
+      )
+      self.atualizar_tabela()
+      messagebox.showinfo(
+          "Sucesso",
+          "Parcela colocada em acordo; os alertas antigos foram congelados.",
+      )
+    except (sqlite3.Error, ValueError) as erro:
+      messagebox.showerror("Erro ao registrar acordo", str(erro))
+
   def excluir_cliente(self):
     selecionado = self.tree.selection()
     if not selecionado:
@@ -644,6 +980,8 @@ class AppGestor(ctk.CTk):
         gestor.excluir_cliente(self.conexao, cliente_id)
         messagebox.showinfo("Sucesso", "Cliente excluído com sucesso!")
         self.atualizar_tabela()
+        self.carregar_clientes_parcelas()
+        self.atualizar_tabela_parcelas()
       except (sqlite3.Error, ValueError) as erro:
         messagebox.showerror("Erro no banco de dados", str(erro))
 

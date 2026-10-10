@@ -1,4 +1,8 @@
-"""Sistema de gestao e cobranca de clientes."""
+"""Sistema de gestao e cobranca de clientes.
+
+Copyright (c) 2026 Marcio Ramos. Todos os direitos reservados.
+Este software e de autoria de Marcio Ramos.
+"""
 
 import re
 import random
@@ -15,6 +19,10 @@ from math import isfinite
 from urllib.parse import quote
 
 CAMINHO_BANCO = "clientes.db"
+STATUS_ABERTOS = ("Pendente", "Atrasada")
+STATUS_OFICIAIS = ("Pendente", "Atrasada", "Paga", "Em Acordo")
+STATUS_FILTROS = ("Todas", *STATUS_OFICIAIS)
+STATUS_PARCELA = ("Pendente", "Atrasada", "Em Acordo", "Adiantada", "Pago")
 
 
 def localizar_navegador_windows():
@@ -95,7 +103,10 @@ def conectar_banco():
 		_adicionar_colunas_antigas(conexao)
 		_criar_tabela_configuracoes(conexao)
 		_criar_tabela_mensalidades(conexao)
+		_criar_metadata_sistema(conexao)
+		_migrar_status_mensalidades(conexao)
 		_sincronizar_mensalidades_existentes(conexao)
+		_atualizar_status_vencidos(conexao)
 		conexao.commit()
 	except Exception:
 		conexao.close()
@@ -116,12 +127,108 @@ def _criar_tabela_mensalidades(conexao):
 				valor REAL NOT NULL,
 				data_vencimento TEXT NOT NULL,
 				status TEXT NOT NULL DEFAULT 'Pendente'
-					CHECK (status IN ('Pendente', 'Atrasado', 'Pago')),
+					CHECK (status IN ('Pendente', 'Atrasada', 'Em Acordo',
+						'Adiantada', 'Pago')),
 				data_pagamento TEXT NULL,
+				data_acordo TEXT NULL,
+				valor_acordo REAL NULL,
+				desconto_adiantado REAL NOT NULL DEFAULT 0,
+				valor_pago REAL NULL,
 				FOREIGN KEY (cliente_id) REFERENCES clientes(id),
 				UNIQUE (cliente_id, mes_referencia)
 			)
 			"""
+		)
+	finally:
+		cursor.close()
+
+
+def _criar_metadata_sistema(conexao):
+	"""Registra autoria e versao em uma tabela interna de metadados."""
+	cursor = conexao.cursor()
+	try:
+		cursor.execute(
+			"""
+			CREATE TABLE IF NOT EXISTS sistema_metadata (
+				chave TEXT PRIMARY KEY,
+				valor TEXT NOT NULL
+			)
+			"""
+		)
+		cursor.executemany(
+			"""
+			INSERT INTO sistema_metadata (chave, valor)
+			VALUES (?, ?)
+			ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor
+			""",
+			(
+				("copyright", "Copyright (c) 2026 Marcio Ramos"),
+				("autor", "Marcio Ramos"),
+				("versao", "1.0.0"),
+			),
+		)
+	finally:
+		cursor.close()
+
+
+def _migrar_status_mensalidades(conexao):
+	"""Migra a tabela antiga, que aceitava apenas Atrasado, com seguranca."""
+	cursor = conexao.cursor()
+	try:
+		cursor.execute(
+			"SELECT sql FROM sqlite_master WHERE type = 'table' "
+			"AND name = 'mensalidades'"
+		)
+		sql_tabela = (cursor.fetchone() or {"sql": ""})["sql"] or ""
+		if "Em Acordo" not in sql_tabela:
+			cursor.execute("ALTER TABLE mensalidades RENAME TO mensalidades_legacy")
+			_criar_tabela_mensalidades(conexao)
+			cursor.execute(
+				"""
+				INSERT INTO mensalidades
+					(id, cliente_id, mes_referencia, valor, data_vencimento,
+					 status, data_pagamento)
+				SELECT id, cliente_id, mes_referencia, valor, data_vencimento,
+					CASE WHEN status = 'Atrasado' THEN 'Atrasada'
+						 ELSE status END,
+					data_pagamento
+				FROM mensalidades_legacy
+				"""
+			)
+			cursor.execute("DROP TABLE mensalidades_legacy")
+		else:
+			cursor.execute("PRAGMA table_info(mensalidades)")
+			colunas = {linha["name"] for linha in cursor.fetchall()}
+			for nome, tipo, padrao in (
+				("data_acordo", "TEXT", "NULL"),
+				("valor_acordo", "REAL", "NULL"),
+				("desconto_adiantado", "REAL", "0"),
+				("valor_pago", "REAL", "NULL"),
+			):
+				if nome not in colunas:
+					cursor.execute(
+						f"ALTER TABLE mensalidades ADD COLUMN {nome} {tipo} "
+						f"DEFAULT {padrao}"
+					)
+		cursor.execute(
+			"UPDATE mensalidades SET status = 'Atrasada' "
+			"WHERE status = 'Atrasado'"
+		)
+	finally:
+		cursor.close()
+
+
+def _atualizar_status_vencidos(conexao):
+	"""Marca como Atrasada somente a parcela aberta que venceu."""
+	cursor = conexao.cursor()
+	try:
+		cursor.execute(
+			"""
+			UPDATE mensalidades
+			SET status = 'Atrasada'
+			WHERE status = 'Pendente' AND data_vencimento < ?
+			""",
+			(date.today().isoformat(),),
 		)
 	finally:
 		cursor.close()
@@ -153,7 +260,7 @@ def _sincronizar_mensalidades_cliente(
 				calendar.monthrange(ano, mes)[1],
 			)
 			vencimento = date(ano, mes, dia)
-			status = "Atrasado" if vencimento < hoje else "Pendente"
+			status = "Atrasada" if vencimento < hoje else "Pendente"
 			if status_inicial == "Pago":
 				status = "Pago"
 			cursor.execute(
@@ -211,15 +318,164 @@ def listar_mensalidades_abertas(conexao, cliente_id):
 			WHERE cliente_id = ? AND status IN (?, ?)
 			ORDER BY data_vencimento, id
 			""",
-			(cliente_id, "Pendente", "Atrasado"),
+			(cliente_id, *STATUS_ABERTOS),
 		)
 		return [dict(linha) for linha in cursor.fetchall()]
 	finally:
 		cursor.close()
 
 
-def dar_baixa_mensalidades(conexao, lista_ids_mensalidades):
-	"""Baixa somente as mensalidades selecionadas e atualiza o cliente."""
+def listar_clientes_filtro(conexao):
+	"""Retorna clientes ordenados para o seletor da aba de parcelas."""
+	cursor = conexao.cursor()
+	try:
+		cursor.execute("SELECT id, nome FROM clientes ORDER BY nome, id")
+		return [dict(linha) for linha in cursor.fetchall()]
+	finally:
+		cursor.close()
+
+
+def inserir_parcela(
+	conexao, cliente_id, mes_referencia, valor, data_vencimento
+):
+	"""Insere uma nova parcela sem alterar o historico do cliente."""
+	mes_referencia = str(mes_referencia or "").strip()
+	if not re.fullmatch(r"\d{1,2}/\d{4}", mes_referencia):
+		raise ValueError("Use a referencia da parcela no formato MM/AAAA.")
+	valor = _normalizar_valor(valor)
+	data_vencimento = _normalizar_data_vencimento(data_vencimento)
+	cursor = conexao.cursor()
+	try:
+		cursor.execute(
+			"""
+			INSERT INTO mensalidades
+				(cliente_id, mes_referencia, valor, data_vencimento, status)
+			VALUES (?, ?, ?, ?, ?)
+			""",
+			(
+				cliente_id,
+				mes_referencia,
+				valor,
+				data_vencimento.isoformat(),
+				(
+					"Atrasada"
+					if data_vencimento < date.today()
+					else "Pendente"
+				),
+			),
+		)
+		conexao.commit()
+		return cursor.lastrowid
+	except sqlite3.IntegrityError as erro:
+		conexao.rollback()
+		raise ValueError(
+			"Ja existe uma parcela com essa referencia para este cliente."
+	) from erro
+	except sqlite3.Error:
+		conexao.rollback()
+		raise
+	finally:
+		cursor.close()
+
+
+def listar_parcelas(conexao, filtro="Atrasada", cliente_id=None):
+	"""Lista parcelas por status e, opcionalmente, por cliente."""
+	if filtro not in STATUS_FILTROS:
+		raise ValueError("Filtro de parcelas invalido.")
+	_atualizar_status_vencidos(conexao)
+	statuses = {
+		"Todas": STATUS_PARCELA,
+		"Pendente": ("Pendente",),
+		"Atrasada": ("Atrasada",),
+		"Paga": ("Pago", "Adiantada"),
+		"Em Acordo": ("Em Acordo",),
+	}[filtro]
+	placeholders = ",".join("?" for _ in statuses)
+	cursor = conexao.cursor()
+	try:
+		cursor.execute(
+			f"""
+			SELECT m.id, m.cliente_id, c.nome AS cliente_nome,
+				   m.mes_referencia, m.valor, m.data_vencimento,
+				   m.status, m.data_pagamento, m.valor_acordo,
+				   m.desconto_adiantado
+			FROM mensalidades m
+			JOIN clientes c ON c.id = m.cliente_id
+			WHERE m.status IN ({placeholders})
+			  AND (? IS NULL OR m.cliente_id = ?)
+			ORDER BY m.data_vencimento, c.nome, m.id
+			""",
+			(*statuses, cliente_id, cliente_id),
+		)
+		return [dict(linha) for linha in cursor.fetchall()]
+	finally:
+		cursor.close()
+
+
+def atualizar_status_mensalidade(conexao, mensalidade_id, novo_status):
+	"""Atualiza imediatamente o status de uma parcela individual."""
+	if novo_status == "Paga":
+		novo_status = "Pago"
+	if novo_status not in STATUS_PARCELA:
+		raise ValueError("Status de parcela invalido.")
+	cursor = conexao.cursor()
+	try:
+		cursor.execute(
+			"SELECT cliente_id FROM mensalidades WHERE id = ?",
+			(mensalidade_id,),
+		)
+		linha = cursor.fetchone()
+		if linha is None:
+			raise ValueError("Parcela nao encontrada.")
+		data_pagamento = (
+			date.today().isoformat()
+			if novo_status in ("Pago", "Adiantada")
+			else None
+		)
+		cursor.execute(
+			"""
+			UPDATE mensalidades
+			SET status = ?, data_pagamento = ?
+			WHERE id = ?
+			""",
+			(novo_status, data_pagamento, mensalidade_id),
+		)
+		cliente_id = linha["cliente_id"]
+		cursor.execute(
+			"""
+			UPDATE clientes
+			SET status_pagamento = CASE
+				WHEN EXISTS (
+					SELECT 1 FROM mensalidades
+					WHERE cliente_id = ? AND status = 'Atrasada'
+				) THEN 'Atrasada'
+				WHEN EXISTS (
+					SELECT 1 FROM mensalidades
+					WHERE cliente_id = ? AND status = 'Em Acordo'
+				) THEN 'Em Acordo'
+				WHEN EXISTS (
+					SELECT 1 FROM mensalidades
+					WHERE cliente_id = ?
+					  AND status IN ('Pendente', 'Atrasada')
+				) THEN 'Pendente'
+				ELSE 'Pago'
+			END
+			WHERE id = ?
+			""",
+			(cliente_id, cliente_id, cliente_id, cliente_id),
+		)
+		conexao.commit()
+	except (sqlite3.Error, ValueError):
+		conexao.rollback()
+		raise
+	finally:
+		cursor.close()
+
+
+def dar_baixa_mensalidades(
+	conexao, lista_ids_mensalidades, desconto_adiantado=0
+):
+	"""Baixa parcelas e registra Adiantada e desconto quando aplicavel."""
 	ids = list(dict.fromkeys(lista_ids_mensalidades))
 	if not ids:
 		raise ValueError("Selecione ao menos uma mensalidade.")
@@ -234,7 +490,7 @@ def dar_baixa_mensalidades(conexao, lista_ids_mensalidades):
 			WHERE id IN ({placeholders})
 			  AND status IN (?, ?)
 			""",
-			(*ids, "Pendente", "Atrasado"),
+			(*ids, *STATUS_ABERTOS),
 		)
 		cliente_ids = [linha["cliente_id"] for linha in cursor.fetchall()]
 		if not cliente_ids:
@@ -243,11 +499,21 @@ def dar_baixa_mensalidades(conexao, lista_ids_mensalidades):
 		cursor.execute(
 			f"""
 			UPDATE mensalidades
-			SET status = ?, data_pagamento = ?
+			SET status = CASE WHEN data_vencimento > ? THEN 'Adiantada'
+				ELSE 'Pago' END,
+				data_pagamento = ?, desconto_adiantado = ?,
+				valor_pago = MAX(0, valor - ?)
 			WHERE id IN ({placeholders})
 			  AND status IN (?, ?)
 			""",
-			("Pago", date.today().isoformat(), *ids, "Pendente", "Atrasado"),
+			(
+				date.today().isoformat(),
+				date.today().isoformat(),
+				_normalizar_desconto(desconto_adiantado),
+				_normalizar_desconto(desconto_adiantado),
+				*ids,
+				*STATUS_ABERTOS,
+			),
 		)
 		quantidade_baixada = cursor.rowcount
 
@@ -259,13 +525,13 @@ def dar_baixa_mensalidades(conexao, lista_ids_mensalidades):
 					WHEN EXISTS (
 						SELECT 1 FROM mensalidades
 						WHERE cliente_id = clientes.id
-						  AND status IN ('Pendente', 'Atrasado')
+						  AND status IN ('Pendente', 'Atrasada')
 					) THEN CASE
 						WHEN EXISTS (
 							SELECT 1 FROM mensalidades
 							WHERE cliente_id = clientes.id
-							  AND status = 'Atrasado'
-						) THEN 'Atrasado'
+							  AND status = 'Atrasada'
+						) THEN 'Atrasada'
 						ELSE 'Pendente'
 					END
 					ELSE 'Pago'
@@ -283,6 +549,80 @@ def dar_baixa_mensalidades(conexao, lista_ids_mensalidades):
 		cursor.close()
 
 
+def _normalizar_desconto(valor):
+	"""Valida desconto sem permitir valor negativo ou maior que a parcela."""
+	try:
+		desconto = float(Decimal(str(valor or 0).replace(",", ".")))
+	except (InvalidOperation, ValueError):
+		raise ValueError("Informe um desconto numerico valido.")
+	if not isfinite(desconto) or desconto < 0:
+		raise ValueError("O desconto nao pode ser negativo.")
+	return desconto
+
+
+def _normalizar_dias_regua(valor, tipo):
+	"""Converte configuracoes da regua em inteiros positivos."""
+	try:
+		dias = int(str(valor).strip())
+	except (TypeError, ValueError):
+		raise ValueError(f"Informe um numero de dias valido para a regua {tipo}.")
+	invalido = dias < 0 if tipo == "pre" else dias < 1
+	if invalido:
+		raise ValueError(
+			"Os dias pre-vencimento nao podem ser negativos e o intervalo "
+			"pos-vencimento deve ser maior que zero."
+		)
+	return dias
+
+
+def registrar_acordo(conexao, mensalidade_id, nova_data, novo_valor):
+	"""Renegocia uma parcela e congela cobrancas do vencimento original."""
+	data_acordo = _normalizar_data_vencimento(nova_data)
+	valor_acordo = _normalizar_valor(novo_valor)
+	cursor = conexao.cursor()
+	try:
+		cursor.execute(
+			"""
+			UPDATE mensalidades
+			SET status = 'Em Acordo', data_acordo = ?,
+				valor_acordo = ?, data_vencimento = ?, valor = ?
+			WHERE id = ? AND status IN (?, ?)
+			""",
+			(
+				date.today().isoformat(),
+				valor_acordo,
+				data_acordo.isoformat(),
+				valor_acordo,
+				mensalidade_id,
+				*STATUS_ABERTOS,
+			),
+		)
+		if cursor.rowcount == 0:
+			raise ValueError("A parcela selecionada nao esta aberta.")
+		cursor.execute(
+			"""
+			UPDATE clientes
+			SET status_pagamento = CASE
+				WHEN EXISTS (
+					SELECT 1 FROM mensalidades
+					WHERE cliente_id = clientes.id
+					  AND status = 'Atrasada'
+				) THEN 'Atrasada'
+				ELSE 'Em Acordo'
+			END
+			WHERE id = (SELECT cliente_id FROM mensalidades WHERE id = ?)
+			""",
+			(mensalidade_id,),
+		)
+		conexao.commit()
+		return True
+	except (sqlite3.Error, ValueError):
+		conexao.rollback()
+		raise
+	finally:
+		cursor.close()
+
+
 def _criar_tabela_configuracoes(conexao):
 	"""Cria e migra a configuracao unica usada nas cobrancas."""
 	cursor = conexao.cursor()
@@ -293,7 +633,9 @@ def _criar_tabela_configuracoes(conexao):
 				id INTEGER PRIMARY KEY CHECK (id = 1),
 				nome_empresa TEXT NOT NULL DEFAULT '',
 				chave_pix TEXT NOT NULL DEFAULT '',
-				nome_banco TEXT NOT NULL DEFAULT ''
+				nome_banco TEXT NOT NULL DEFAULT '',
+				dias_cobranca_pre_vencimento INTEGER NOT NULL DEFAULT 2,
+				intervalo_cobranca_pos_vencimento INTEGER NOT NULL DEFAULT 3
 			)
 			"""
 		)
@@ -304,34 +646,63 @@ def _criar_tabela_configuracoes(conexao):
 				"ALTER TABLE configuracoes ADD COLUMN nome_banco TEXT "
 				"NOT NULL DEFAULT ''"
 			)
+		for nome, padrao in (
+			("dias_cobranca_pre_vencimento", 2),
+			("intervalo_cobranca_pos_vencimento", 3),
+		):
+			if nome not in colunas:
+				cursor.execute(
+					f"ALTER TABLE configuracoes ADD COLUMN {nome} "
+					f"INTEGER NOT NULL DEFAULT {padrao}"
+				)
 		cursor.execute(
 			"""
 			INSERT OR IGNORE INTO configuracoes
-				(id, nome_empresa, chave_pix, nome_banco)
-			VALUES (1, '', '', '')
+				(id, nome_empresa, chave_pix, nome_banco,
+				 dias_cobranca_pre_vencimento,
+				 intervalo_cobranca_pos_vencimento)
+			VALUES (1, '', '', '', 2, 3)
 			"""
 		)
 	finally:
 		cursor.close()
 
 
-def salvar_configuracoes(conexao, nome_empresa, chave_pix, nome_banco):
+def salvar_configuracoes(
+	conexao,
+	nome_empresa,
+	chave_pix,
+	nome_banco,
+	dias_cobranca_pre_vencimento=2,
+	intervalo_cobranca_pos_vencimento=3,
+):
 	"""Persiste os dados usados nas mensagens de cobranca."""
 	cursor = conexao.cursor()
 	try:
 		cursor.execute(
 			"""
-			INSERT INTO configuracoes (id, nome_empresa, chave_pix, nome_banco)
-			VALUES (1, ?, ?, ?)
+			INSERT INTO configuracoes
+				(id, nome_empresa, chave_pix, nome_banco,
+				 dias_cobranca_pre_vencimento,
+				 intervalo_cobranca_pos_vencimento)
+			VALUES (1, ?, ?, ?, ?, ?)
 			ON CONFLICT(id) DO UPDATE SET
 				nome_empresa = excluded.nome_empresa,
 				chave_pix = excluded.chave_pix,
-				nome_banco = excluded.nome_banco
+				nome_banco = excluded.nome_banco,
+				dias_cobranca_pre_vencimento =
+					excluded.dias_cobranca_pre_vencimento,
+				intervalo_cobranca_pos_vencimento =
+					excluded.intervalo_cobranca_pos_vencimento
 			""",
 			(
 				str(nome_empresa or "").strip(),
 				str(chave_pix or "").strip(),
 				str(nome_banco or "").strip(),
+				_normalizar_dias_regua(dias_cobranca_pre_vencimento, "pre"),
+				_normalizar_dias_regua(
+					intervalo_cobranca_pos_vencimento, "pos"
+				),
 			),
 		)
 		conexao.commit()
@@ -363,7 +734,9 @@ def obter_configuracoes(conexao):
 	try:
 		cursor.execute(
 			"""
-			SELECT nome_empresa, chave_pix, nome_banco
+			SELECT nome_empresa, chave_pix, nome_banco,
+				   dias_cobranca_pre_vencimento,
+				   intervalo_cobranca_pos_vencimento
 			FROM configuracoes
 			WHERE id = ?
 			""",
@@ -371,7 +744,13 @@ def obter_configuracoes(conexao):
 		)
 		linha = cursor.fetchone()
 		if linha is None:
-			return {"nome_empresa": "", "chave_pix": "", "nome_banco": ""}
+			return {
+				"nome_empresa": "",
+				"chave_pix": "",
+				"nome_banco": "",
+				"dias_cobranca_pre_vencimento": 2,
+				"intervalo_cobranca_pos_vencimento": 3,
+			}
 		return dict(linha)
 	finally:
 		cursor.close()
@@ -398,6 +777,10 @@ def _adicionar_colunas_antigas(conexao):
 				ADD COLUMN ultimo_envio_cobranca TEXT NULL
 				"""
 			)
+		cursor.execute(
+			"UPDATE clientes SET status_pagamento = 'Atrasada' "
+			"WHERE status_pagamento = 'Atrasado'"
+		)
 	finally:
 		cursor.close()
 
@@ -536,7 +919,7 @@ def cadastrar_cliente(
 				telefone,
 				valor,
 				data_vencimento.isoformat(),
-				"Atrasado" if datas_atrasadas else "Pendente",
+				"Atrasada" if datas_atrasadas else "Pendente",
 			),
 		)
 		cliente_id = cursor.lastrowid
@@ -553,7 +936,7 @@ def cadastrar_cliente(
 						data_atrasada.strftime("%m/%Y"),
 						valor,
 						data_atrasada.isoformat(),
-						"Atrasado",
+						"Atrasada",
 					),
 				)
 		else:
@@ -574,7 +957,7 @@ def cadastrar_cliente(
 					data_atual.strftime("%m/%Y"),
 					valor,
 					data_mensalidade.isoformat(),
-					"Atrasado" if data_mensalidade < date.today() else "Pendente",
+					"Atrasada" if data_mensalidade < date.today() else "Pendente",
 				),
 			)
 		conexao.commit()
@@ -624,7 +1007,7 @@ def atualizar_cliente(
 			DELETE FROM mensalidades
 			WHERE cliente_id = ? AND status IN (?, ?)
 			""",
-			(cliente_id, "Pendente", "Atrasado"),
+			(cliente_id, "Pendente", "Atrasada"),
 		)
 		if datas_atrasadas:
 			for data_atrasada in datas_atrasadas:
@@ -639,10 +1022,10 @@ def atualizar_cliente(
 						data_atrasada.strftime("%m/%Y"),
 						valor_mensalidade,
 						data_atrasada.isoformat(),
-						"Atrasado",
+						"Atrasada",
 					),
 				)
-			status_cliente = "Atrasado"
+			status_cliente = "Atrasada"
 		else:
 			data_atual = date.today()
 			dia = min(
@@ -661,11 +1044,11 @@ def atualizar_cliente(
 					data_atual.strftime("%m/%Y"),
 					valor_mensalidade,
 					data_mensalidade.isoformat(),
-					"Atrasado" if data_mensalidade < date.today() else "Pendente",
+					"Atrasada" if data_mensalidade < date.today() else "Pendente",
 				),
 			)
 			status_cliente = (
-				"Atrasado"
+				"Atrasada"
 				if data_mensalidade < date.today()
 				else "Pendente"
 			)
@@ -712,10 +1095,10 @@ def listar_clientes(conexao):
 				cliente["ultimo_envio_cobranca"]
 			)
 		if (
-			cliente["status_pagamento"] != "Pago"
+			cliente["status_pagamento"] not in ("Pago", "Em Acordo")
 			and cliente["data_vencimento"] < hoje
 		):
-			cliente["status_pagamento"] = "Atrasado"
+			cliente["status_pagamento"] = "Atrasada"
 
 	print("\n--- CLIENTES ---")
 	for cliente in clientes:
@@ -790,9 +1173,8 @@ def _meses_pendentes(data_vencimento, hoje):
 def gerar_cobrancas(conexao, forcar=False):
 	"""Gera cobrancas automaticas ou manuais e registra os envios.
 
-	Quando ``forcar`` e falso, aplica a regra de tres dias de atraso e
-	carencia de dois dias. O modo forcado e destinado ao disparo manual
-	da empresa e ignora apenas essas restricoes de calendario.
+	Quando ``forcar`` e falso, respeita a regua configurada pela empresa.
+	Parcelas em acordo nao aparecem nesta consulta e ficam sem alertas.
 	"""
 	hoje = date.today()
 	configuracoes = obter_configuracoes(conexao)
@@ -824,56 +1206,58 @@ def gerar_cobrancas(conexao, forcar=False):
 				mensalidade["data_vencimento"]
 			)
 			if (
-				data_mensalidade < hoje
-				and mensalidade["status"] == "Pendente"
+				mensalidade["status"] == "Pendente"
+				and data_mensalidade < hoje
 			):
 				cursor = conexao.cursor()
 				try:
 					cursor.execute(
 						"""
 						UPDATE mensalidades
-						SET status = ?
-						WHERE id = ? AND status = ?
+						SET status = 'Atrasada'
+						WHERE id = ? AND status = 'Pendente'
 						""",
-						("Atrasado", mensalidade["id"], "Pendente"),
+						(mensalidade["id"],),
 					)
 					conexao.commit()
-					mensalidade["status"] = "Atrasado"
 				finally:
 					cursor.close()
-
-		dias_atraso = max(
-			(
-				hoje - date.fromisoformat(m["data_vencimento"])
-			).days
-			for m in mensalidades_abertas
-			if date.fromisoformat(m["data_vencimento"]) <= hoje
-		) if any(
-			date.fromisoformat(m["data_vencimento"]) <= hoje
-			for m in mensalidades_abertas
-		) else -1
-		if not forcar:
-			if dias_atraso < 3:
-				continue
+				mensalidade["status"] = "Atrasada"
 
 		ultimo_envio = cliente["ultimo_envio_cobranca"]
 		if ultimo_envio is not None:
 			ultimo_envio = date.fromisoformat(ultimo_envio)
+		if forcar:
+			mensalidades_cobranca = mensalidades_abertas
+		else:
+			dias_pre = configuracoes["dias_cobranca_pre_vencimento"]
+			intervalo_pos = configuracoes[
+				"intervalo_cobranca_pos_vencimento"
+			]
+			mensalidades_cobranca = []
+			for mensalidade in mensalidades_abertas:
+				data_mensalidade = date.fromisoformat(
+					mensalidade["data_vencimento"]
+				)
+				if data_mensalidade >= hoje:
+					if (data_mensalidade - hoje).days <= dias_pre:
+						mensalidades_cobranca.append(mensalidade)
+				elif ultimo_envio is None or (
+					hoje - ultimo_envio
+				).days >= intervalo_pos:
+					mensalidades_cobranca.append(mensalidade)
+			if not mensalidades_cobranca:
+				continue
 		deve_enviar = (
 			forcar
 			or ultimo_envio is None
-			or (hoje - ultimo_envio).days >= 2
+			or (hoje - ultimo_envio).days >= configuracoes[
+				"intervalo_cobranca_pos_vencimento"
+			]
 		)
 		if not deve_enviar:
 			continue
 
-		if forcar:
-			mensalidades_cobranca = mensalidades_abertas
-		else:
-			mensalidades_cobranca = [
-				m for m in mensalidades_abertas
-				if date.fromisoformat(m["data_vencimento"]) <= hoje
-			]
 		meses_pendentes = [
 			mensalidade["mes_referencia"]
 			for mensalidade in mensalidades_cobranca
@@ -936,7 +1320,14 @@ def gerar_cobrancas(conexao, forcar=False):
 				""",
 				(
 					hoje.isoformat(),
-					"Atrasado" if dias_atraso >= 1 else "Pendente",
+					(
+						"Atrasada"
+						if any(
+							m["status"] == "Atrasada"
+							for m in mensalidades_abertas
+						)
+						else "Pendente"
+					),
 					cliente["id"],
 				),
 			)

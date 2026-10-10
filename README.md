@@ -19,6 +19,7 @@ sem a necessidade de instalar ou manter um servidor de banco de dados.
   - Navegação em abas:
     - 👤 **Cliente**: cadastro, edição e dados de cobrança.
     - ⚙️ **Configurações**: empresa, chave PIX e banco/favorecido.
+    - **Parcelas**: filtros rápidos e alteração individual de status financeiro.
 - **Cadastro e edição de clientes**
   - Validação de nome, telefone, valor e dia de vencimento.
   - Sanitização automática de telefones com código do Brasil (`55`).
@@ -27,9 +28,10 @@ sem a necessidade de instalar ou manter um servidor de banco de dados.
   - Cadastro de várias datas históricas separadas por vírgula.
 - **Gestão de mensalidades**
   - Histórico individual por cliente.
-  - Controle dos status `Pendente`, `Atrasado` e `Pago`.
+  - Controle dos status `Pendente`, `Atrasada`, `Em Acordo`, `Adiantada` e `Pago`.
   - Modal de baixa parcial/individual com caixas de seleção.
   - Registro da data de pagamento.
+  - Registro de nova data/valor em renegociações e desconto em pagamentos antecipados.
   - Atualização automática do status geral do cliente.
 - **Cobranças pelo WhatsApp Web**
   - Mensagens personalizadas com nome do cliente, empresa, meses em aberto,
@@ -41,8 +43,8 @@ sem a necessidade de instalar ou manter um servidor de banco de dados.
 - **Disparo manual e automático**
   - O disparo manual permite à empresa enviar cobranças imediatamente para os
     clientes em aberto.
-  - A rotina automática aplica a regra de pelo menos 3 dias de atraso e
-    carência de 2 dias entre envios.
+  - A rotina automática usa dias pré-vencimento e intervalo pós-vencimento
+    configuráveis por empresa.
 - **Intervalo entre envios**
   - O processamento ocorre em uma thread separada para manter a interface
     responsiva.
@@ -172,6 +174,16 @@ O arquivo `clientes.db` contém principalmente:
 - `mensalidades`: parcelas, meses de referência, vencimentos, valores e
   pagamentos individuais.
 - `configuracoes`: nome da empresa, chave PIX e banco/favorecido.
+- `sistema_metadata`: metadata interna de autoria, copyright e versão.
+
+Na aba **⚙️ Configurações**, informe os dias de aviso pré-vencimento e o
+intervalo recorrente após o vencimento. Parcelas em `Em Acordo` não entram nos
+alertas normais até que um novo fluxo de baixa seja aplicado.
+
+Na aba **Parcelas**, os filtros **Atrasada**, **Paga** e **Em Acordo** exibem,
+respectivamente, parcelas pendentes/vencidas, parcelas liquidadas/adiantadas e
+parcelas renegociadas. Dê duplo clique em uma linha para alterar seu status
+individualmente.
 
 O arquivo é local e está incluído no `.gitignore`. Para fazer backup, copie o
 `clientes.db` com a aplicação fechada.
