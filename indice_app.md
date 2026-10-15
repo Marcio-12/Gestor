@@ -2,17 +2,19 @@
 
 | Número da Linha | Componente / Aba / Função / Evento | Descrição resumida |
 | --- | --- | --- |
-| 1 | Módulo e copyright | Importa a interface, SQLite e identifica a autoria do software. |
+| 1 | Módulo e copyright | Identifica o aplicativo AutoGestor, importa a interface, SQLite e registra a autoria do software. |
 | 16 | `formatar_valor_moeda()` | Aplica máscara de reais aos campos monetários. |
-| 30 | `AppGestor(ctk.CTk)` | Classe principal da interface gráfica. |
+| 30 | `AppGestor(ctk.CTk)` | Classe principal da interface gráfica do AutoGestor. |
 | 32 | `__init__()` | Monta janela, formulários, abas, tabelas, filtros e rodapé. |
 | 255 | `abas_financeiras` | Cria as abas principais `Clientes` e `Parcelas`. |
 | 258 | Aba `Parcelas` | Centraliza a gestão financeira individual por cliente. |
 | 342 | `frame_inserir_parcela` | Exibe logo abaixo do menu os campos de data, valor e o botão azul de inserção; a referência é gerada a partir do mês da data. |
 | 354 | Eventos de máscara | Conecta `KeyRelease` aos campos de data e valor. |
 | 403 | `tree_parcelas` | Tabela de parcelas com cliente, referência, vencimento, valor e status. |
-| 448 | `atualizar_tabela()` | Recarrega a tabela de clientes. |
-| 471 | `atualizar_tabela_parcelas()` | Filtra parcelas pela combinação de cliente e status selecionados: Todas, Pendente, Atrasada, Paga ou Em Acordo. |
+| 480 | `atualizar_tabela()` | Recarrega a tabela de clientes e recria as caixas de seleção por linha. |
+| 518 | `alternar_selecao_clientes()` | Marca ou desmarca todos os clientes exibidos. |
+| 524 | `atualizar_selecao_total()` | Sincroniza o controle de seleção total com as caixas individuais. |
+| 532 | `atualizar_tabela_parcelas()` | Filtra parcelas pela combinação de cliente e status selecionados: Todas, Pendente, Atrasada, Paga ou Em Acordo. |
 | 505 | `carregar_clientes_parcelas()` | Atualiza o menu com clientes cadastrados e seus IDs. |
 | 527 | `filtrar_parcelas_por_cliente()` | Exibe parcelas do cliente selecionado, ou de todos os clientes, em conjunto com o status escolhido e controla o botão de inserção. |
 | 537 | `inserir_parcela()` | Valida data e valor, gera a referência `MM/AAAA` a partir da data, insere a parcela e atualiza as tabelas. |
@@ -32,7 +34,8 @@
 | 841 | `cancelar_edicao()` | Limpa o formulário e restaura o modo de cadastro. |
 | 853 | `marcar_como_pago()` | Fluxo legado de baixa mantido apenas para compatibilidade. |
 | 948 | `registrar_acordo()` | Fluxo legado de acordo mantido apenas para compatibilidade. |
-| 982 | `excluir_cliente()` | Exclui o cliente selecionado após confirmação. |
-| 1004 | `disparar_cobrancas()` | Valida configurações e inicia a thread de cobrança. |
+| 1036 | `excluir_cliente()` | Exclui o cliente selecionado após confirmação. |
+| 1058 | `excluir_clientes_selecionados()` | Confirma a exclusão em lote e atualiza as abas de clientes e parcelas. |
+| 1093 | `disparar_cobrancas()` | Valida configurações e inicia a thread de cobrança do AutoGestor. |
 | 1029 | `_executar_cobrancas_em_background()` | Executa o backend sem bloquear a interface. |
 | 1041 | `_finalizar_cobrancas()` | Reabilita o botão e apresenta o resultado ao usuário. |

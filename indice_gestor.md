@@ -2,12 +2,12 @@
 
 | Número da Linha | Nome da Função / Classe / Módulo | Descrição resumida do que faz |
 | --- | --- | --- |
-| 1 | Módulo e copyright | Declara o módulo, a autoria e os direitos autorais de Marcio Ramos. |
+| 1 | Módulo e copyright | Declara o AutoGestor, a autoria e os direitos autorais de Marcio Ramos. |
 | 26 | `localizar_navegador_windows()` | Localiza navegadores nos caminhos usuais do Windows. |
 | 48 | `abrir_link_whatsapp()` | Abre o WhatsApp Web e automatiza o envio da mensagem. |
 | 81 | `conectar_banco()` | Inicializa o SQLite e executa as migrações necessárias. |
 | 115 | `_criar_tabela_mensalidades()` | Cria a tabela persistente de parcelas e seus campos financeiros. |
-| 144 | `_criar_metadata_sistema()` | Registra autoria, copyright e versão em `sistema_metadata`. |
+| 144 | `_criar_metadata_sistema()` | Registra nome do AutoGestor, autoria, copyright e versão em `sistema_metadata`. |
 | 172 | `_migrar_status_mensalidades()` | Migra status legados e campos de acordo/desconto. |
 | 219 | `_atualizar_status_vencidos()` | Converte parcelas pendentes vencidas para `Atrasada`. |
 | 23 | `STATUS_OFICIAIS` | Define os quatro status globais: Pendente, Atrasada, Paga e Em Acordo. |
@@ -44,4 +44,5 @@
 | 1144 | `_meses_pendentes()` | Gera referências mensais em aberto. |
 | 1167 | `gerar_cobrancas()` | Filtra cobranças pela régua e ignora acordos. |
 | 1338 | `excluir_cliente()` | Exclui cliente e histórico de mensalidades. |
-| 1361 | `menu()` | Executa o fluxo de operação no terminal. |
+| 1367 | `excluir_clientes()` | Remove vários clientes e suas mensalidades associadas em uma transação SQLite. |
+| 1399 | `menu()` | Executa o fluxo de operação no terminal. |

@@ -1,4 +1,4 @@
-"""Sistema de gestao e cobranca de clientes.
+"""AutoGestor - sistema de gestao e cobranca de clientes.
 
 Copyright (c) 2026 Marcio Ramos. Todos os direitos reservados.
 Este software e de autoria de Marcio Ramos.
@@ -162,6 +162,7 @@ def _criar_metadata_sistema(conexao):
 			ON CONFLICT(chave) DO UPDATE SET valor = excluded.valor
 			""",
 			(
+				("aplicativo", "AutoGestor"),
 				("copyright", "Copyright (c) 2026 Marcio Ramos"),
 				("autor", "Marcio Ramos"),
 				("versao", "1.0.0"),
@@ -1066,7 +1067,7 @@ def atualizar_cliente(
 
 
 def listar_clientes(conexao):
-	"""Exibe os clientes e atualiza status vencido quando necessario."""
+	"""Exibe os clientes e atualiza status vencido quando necessário."""
 	cursor = conexao.cursor()
 	try:
 		cursor.execute(
@@ -1100,7 +1101,7 @@ def listar_clientes(conexao):
 		):
 			cliente["status_pagamento"] = "Atrasada"
 
-	print("\n--- CLIENTES ---")
+	print("\n--- AUTOGESTOR | CLIENTES ---")
 	for cliente in clientes:
 		data_formatada = cliente["data_vencimento"].strftime("%d/%m/%Y")
 		print(
@@ -1114,7 +1115,7 @@ def listar_clientes(conexao):
 
 
 def registrar_pagamento(conexao, cliente_id):
-	"""Mantem compatibilidade e baixa todas as mensalidades abertas."""
+	"""Mantém compatibilidade e baixa todas as mensalidades abertas."""
 	mensalidades = listar_mensalidades_abertas(conexao, cliente_id)
 	if mensalidades:
 		return dar_baixa_mensalidades(
@@ -1143,7 +1144,7 @@ def registrar_pagamento(conexao, cliente_id):
 
 
 def _telefone_whatsapp(telefone):
-	"""Retorna somente os digitos, incluindo o codigo do Brasil quando necessario."""
+	"""Retorna somente os dígitos, incluindo o código do Brasil quando necessário."""
 	return _normalizar_telefone(telefone)
 
 
@@ -1364,13 +1365,45 @@ def excluir_cliente(conexao, cliente_id):
 		cursor.close()
 
 
+def excluir_clientes(conexao, cliente_ids):
+	"""Exclui varios clientes e todo o historico de mensalidades associado."""
+	ids = list(dict.fromkeys(cliente_ids))
+	if not ids:
+		raise ValueError("Informe ao menos um cliente para excluir.")
+	if any(
+		not isinstance(cliente_id, int) or isinstance(cliente_id, bool)
+		for cliente_id in ids
+	):
+		raise ValueError("Os IDs dos clientes devem ser inteiros.")
+
+	placeholders = ", ".join("?" for _ in ids)
+	cursor = conexao.cursor()
+	try:
+		cursor.execute(
+			f"DELETE FROM mensalidades WHERE cliente_id IN ({placeholders})",
+			ids,
+		)
+		cursor.execute(
+			f"DELETE FROM clientes WHERE id IN ({placeholders})",
+			ids,
+		)
+		quantidade = cursor.rowcount
+		conexao.commit()
+		return quantidade
+	except sqlite3.Error:
+		conexao.rollback()
+		raise
+	finally:
+		cursor.close()
+
+
 def menu():
 	"""Executa o menu principal do sistema."""
 	conexao = None
 	try:
 		conexao = conectar_banco()
 		while True:
-			print("\n--- MENU ---")
+			print("\n--- AUTOGESTOR ---")
 			print("1 - Cadastrar novo cliente")
 			print("2 - Registrar pagamento (dar baixa)")
 			print("3 - Listar todos os clientes e status")

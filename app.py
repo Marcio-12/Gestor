@@ -33,13 +33,15 @@ class AppGestor(ctk.CTk):
     super().__init__()
 
     # Configurações da Janela
-    self.title("Gestor de Clientes & Cobranças WhatsApp")
+    self.title("AutoGestor - Gestão de Clientes & Cobranças")
     self.geometry("1150x700")
     self.minsize(1050, 650)
 
     # Conexão com o Banco SQLite
     self.conexao = gestor.conectar_banco()
     self.cliente_em_edicao = None
+    self.selecoes_clientes = {}
+    self.selecionar_todos_clientes = tk.BooleanVar(value=False)
 
     # Layout Principal (Grid 2 Colunas)
     self.grid_columnconfigure(1, weight=1)
@@ -281,6 +283,25 @@ class AppGestor(ctk.CTk):
     )
     self.btn_excluir.pack(side="left", padx=5)
 
+    self.chk_selecionar_todos = ctk.CTkCheckBox(
+        self.frame_acoes,
+        text="Selecionar todos",
+        variable=self.selecionar_todos_clientes,
+        command=self.alternar_selecao_clientes,
+        width=150,
+    )
+    self.chk_selecionar_todos.pack(side="left", padx=12)
+
+    self.btn_excluir_selecionados = ctk.CTkButton(
+        self.frame_acoes,
+        text="🗑️ Excluir Selecionados",
+        fg_color="#b00020",
+        hover_color="#7f0017",
+        width=170,
+        command=self.excluir_clientes_selecionados,
+    )
+    self.btn_excluir_selecionados.pack(side="left", padx=5)
+
     # Estilização da Tabela Treeview (Modo Escuro)
     style = ttk.Style()
     style.theme_use("default")
@@ -295,8 +316,28 @@ class AppGestor(ctk.CTk):
 
     # Tabela
     colunas = ("id", "nome", "telefone", "valor", "vencimento", "status")
+    self.frame_tabela_clientes = ctk.CTkFrame(
+        self.aba_clientes, fg_color="transparent"
+    )
+    self.frame_tabela_clientes.grid(
+        row=1, column=0, padx=10, pady=(0, 10), sticky="nsew"
+    )
+    self.frame_tabela_clientes.grid_rowconfigure(0, weight=1)
+    self.frame_tabela_clientes.grid_columnconfigure(1, weight=1)
+
+    self.frame_selecoes_clientes = ctk.CTkFrame(
+        self.frame_tabela_clientes, width=38
+    )
+    self.frame_selecoes_clientes.grid(
+        row=0, column=0, padx=(0, 2), sticky="ns"
+    )
+    self.frame_selecoes_clientes.grid_propagate(False)
+    ctk.CTkLabel(
+        self.frame_selecoes_clientes, text="✓", width=38, height=28
+    ).pack()
+
     self.tree = ttk.Treeview(
-        self.aba_clientes, columns=colunas, show="headings"
+        self.frame_tabela_clientes, columns=colunas, show="headings"
     )
 
     self.tree.heading("id", text="ID")
@@ -313,7 +354,7 @@ class AppGestor(ctk.CTk):
     self.tree.column("vencimento", width=100, anchor="center")
     self.tree.column("status", width=90, anchor="center")
 
-    self.tree.grid(row=1, column=0, padx=10, pady=(0, 10), sticky="nsew")
+    self.tree.grid(row=0, column=1, sticky="nsew")
     self.tree.tag_configure("Pago", foreground="#55d66b")
     self.tree.tag_configure("Atrasada", foreground="#ff5c5c")
     self.tree.tag_configure("Em Acordo", foreground="#c58cff")
@@ -423,7 +464,7 @@ class AppGestor(ctk.CTk):
     )
     self.lbl_assinatura = ctk.CTkLabel(
         self.frame_rodape,
-        text="v1.0.0 | Dev: Marcio Ramos",
+        text="v1.0.0 | Dev: Marcio Ramos - AutoGestor",
         font=ctk.CTkFont(size=9),
         text_color="#505050",
     )
@@ -440,6 +481,10 @@ class AppGestor(ctk.CTk):
     """Limpa e recarrega os dados da tabela vindos do banco."""
     for item in self.tree.get_children():
       self.tree.delete(item)
+    for _variavel, checkbox in self.selecoes_clientes.values():
+      checkbox.destroy()
+    self.selecoes_clientes = {}
+    self.selecionar_todos_clientes.set(False)
 
     clientes = gestor.listar_clientes(self.conexao)
     for c in clientes:
@@ -458,6 +503,31 @@ class AppGestor(ctk.CTk):
           ),
           tags=(c["status_pagamento"],),
       )
+      variavel = tk.BooleanVar(value=False)
+      checkbox = ctk.CTkCheckBox(
+          self.frame_selecoes_clientes,
+          text="",
+          width=38,
+          height=28,
+          variable=variavel,
+          command=self.atualizar_selecao_total,
+        )
+      checkbox.pack()
+      self.selecoes_clientes[c["id"]] = (variavel, checkbox)
+
+  def alternar_selecao_clientes(self):
+    """Marca ou desmarca todos os clientes exibidos."""
+    selecionado = self.selecionar_todos_clientes.get()
+    for variavel, _checkbox in self.selecoes_clientes.values():
+      variavel.set(selecionado)
+
+  def atualizar_selecao_total(self):
+    """Mantém o controle de seleção total sincronizado com as linhas."""
+    todas_selecionadas = bool(self.selecoes_clientes) and all(
+        variavel.get()
+        for variavel, _checkbox in self.selecoes_clientes.values()
+    )
+    self.selecionar_todos_clientes.set(todas_selecionadas)
 
   def atualizar_tabela_parcelas(self):
     """Atualiza a lista financeira conforme o chip de status selecionado."""
@@ -984,6 +1054,41 @@ class AppGestor(ctk.CTk):
         self.atualizar_tabela_parcelas()
       except (sqlite3.Error, ValueError) as erro:
         messagebox.showerror("Erro no banco de dados", str(erro))
+
+  def excluir_clientes_selecionados(self):
+    """Confirma e exclui os clientes marcados e suas parcelas."""
+    cliente_ids = [
+        cliente_id
+        for cliente_id, (variavel, _checkbox) in self.selecoes_clientes.items()
+        if variavel.get()
+    ]
+    if not cliente_ids:
+      messagebox.showwarning(
+          "Aviso", "Marque ao menos um cliente para excluir."
+      )
+      return
+
+    quantidade = len(cliente_ids)
+    confirmar = messagebox.askyesno(
+        "Confirmação",
+        "Tem certeza que deseja excluir os "
+        f"{quantidade} clientes selecionados e todo o seu histórico "
+        "de parcelas?",
+    )
+    if not confirmar:
+      return
+
+    try:
+      gestor.excluir_clientes(self.conexao, cliente_ids)
+      messagebox.showinfo(
+          "Sucesso",
+          f"{quantidade} cliente(s) e seu histórico foram excluídos.",
+      )
+      self.atualizar_tabela()
+      self.carregar_clientes_parcelas()
+      self.atualizar_tabela_parcelas()
+    except (sqlite3.Error, ValueError) as erro:
+      messagebox.showerror("Erro no banco de dados", str(erro))
 
   def disparar_cobrancas(self):
     if self.btn_cobrancas.cget("state") == "disabled":
